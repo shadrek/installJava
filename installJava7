@@ -1,0 +1,374 @@
+#!/bin/bash
+#
+# My project to teach myself bash
+# This script is supposed to automate the installation process for Oracle Java JDK
+# You have to manually download the Oracle JDK .tar.gz file from their website
+# (https://www.oracle.com/technetwork/java/javase/downloads/index.html at time of writing)
+# then place it in the same folder as this script before running the script.
+# This script has been tested on Ubuntu 14.04, Arch linux and Manjaro Linux.
+# It will not work on non Debian and non Arch based systems.
+# 
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 3 of the License, or
+#  (at your option) any later version.
+#  
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#  
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+#  MA 02110-1301, USA.
+#  I am only learning shell scripting, so if you see anything that can
+#  be improved, then please contribute or let me know, thanks.
+# 
+# May19 Commented out firefox pluging installation due to the plugin no longer being used.
+
+PATHFILE=/etc/profile
+FIREFOX_DIR=/home/${SUDO_USER}/.mozilla/firefox
+FOX_PLUG_DIR=/home/${SUDO_USER}/.mozilla/plugins
+FOX_PLUGIN=${FOX_PLUG_DIR}/libnpjp2.so   
+_distro=$(lsb_release -is)
+_isLinux=$(uname -s)
+
+getInit (){
+    if [[ -e /usr/lib/systemd ]]; then
+	_init="systemd"
+    elif
+	[[ -e /usr/share/upstart ]]; then
+	_init="upstart"
+    elif
+	[[ -e /etc/init.d ]]; then
+	_init="sysV"
+    fi
+}
+
+checkLinux (){
+    if [[ ${_isLinux} == Linux || ${_isLinux} == GNU || ${_isLinux} == GNU/* ]]; then
+	echo "Your system is running ${_isLinux}"
+	getDistro
+    else
+	echo "Script only runs in GNU/Linux"
+	exit 2
+    fi
+}
+
+getDistro () {
+    if [[ ${_distro} != Ubuntu && ${_distro} != Mint && ${_distro} != Debian && ${_distro} != Arch && ${_distro} != ManjaroLinux ]]; then
+	echo "Your ${_isLinux} distro is ${_distro}."
+	echo "This script can only install Oracle Java in Debian, Ubuntu, Linux Mint, Arch and Manjaro Linux"
+	echo "Sorry for that!" 1>&2
+	exit 2
+    else
+	echo "Your system is running ${_distro}"
+    fi
+}
+
+checkRoot () {
+    # Test for root
+    if [ $EUID -ne 0 ]; then
+	echo "Java installation script must be run as root. (Hint: use sudo)" 1>&2
+	exit 1
+    fi
+}
+
+RunChoice () {
+     while true; do
+	read -p "Oracle Java will be installed on this system. Would you like to continue? (y/n):" yn
+        case $yn in
+            [Yy]* ) echo "Installing java..."
+		    break;;
+            [Nn]* ) exit;;
+            *     ) echo "Please answer 'y' for yes or 'n' for no.";;
+        esac
+    done
+}
+
+
+getJDKversion () {
+    #Get version number of downloaded jdk tar file, and store it in a text file
+    ls jdk* > version.txt
+    
+    #a=($(wc file.txt))
+    #Store number of lines in the version.txt file in a variable
+    #(equates to number of files beginning with 'jdk' in same folder as script)
+    NUM_OF_JDK_FILES=($(wc -l < version.txt))
+
+    if [[ "$NUM_OF_JDK_FILES" == 0 ]] ; then
+	echo "There are no java jdk-* tar files in the folder with the"
+	echo "installJava script. Copy and paste your jdk-* tar file into"
+	echo "the same folder as this installJava script and try again" 1>&2
+	exit 9
+    elif [[ "$NUM_OF_JDK_FILES" > 1 ]] ; then
+	echo "You have $NUM_OF_JDK_FILES files starting with the letters 'jdk'"
+	echo "in the same folder as the installJava script. Please remove"
+	echo "the extra incorrect files and ensure that you only have the"
+	echo "one correct compressed jdk-* tar file in the same folder with"
+	echo "the installJava script, before you try and run it again." 1>&2
+	exit 10
+    fi
+
+    #Assign the version number from the text file into JDKTAR variable
+    read JDKTAR < version.txt
+    if [[ -z ${JDKTAR} ]] ; then
+	echo "JKDTAR variable in the 'getJDKversion' function hasn't been assigned"
+	echo "a value.  Better check the script code and start again. Nothing has been"
+        echo "installed."
+	exit 11
+    fi
+}
+
+untarJDK () {
+    echo "ucompressing your ${JDKTAR} folder"
+    #unpack .tar file, move .tar file to either trash folder or home folder
+    #to prevent confusion when storing JDK_VERSION number, read version number 
+    #of unpacked file and store it in a text file then assign contents of text file
+    #to JKD_VERSION variable.
+    
+    tar -xvf ${JDKTAR}
+    if [[ -d /home/${SUDO_USER}/.local/share/Trash/files ]]; then
+	mv ${JDKTAR} /home/${SUDO_USER}/.local/share/Trash/files
+	echo "Moved your ${JDKTAR} folder to the rubbish bin"
+    else
+	mv ${JDKTAR} /home/${SUDO_USER}
+	echo "Moved your ${JDKTAR} folder to your home folder"
+    fi
+    
+    ls -d * | grep jdk1*.* > JDK_VERSION.txt
+    read JDK_VERSION < JDK_VERSION.txt
+   
+     if [[ -z ${JDK_VERSION} ]] ; then
+	echo "The JDK_VERSION variable has not been assigned a value in the"
+        echo "untarJDK function - better check the install script code."
+	echo "At this stage the jdk tar file has been uncompressed and will"
+	echo "still be in the same folder as the script with nothing installed"
+	echo "Better copy the .tar.gz folder back, fix the code and start again"
+	echo "Bye for now"
+	exit 12
+     else
+	  echo "JDK_VERSION: ${JDK_VERSION}"
+    fi
+}
+
+mvJDK () {
+    #Check if java directory exists - if so check if same jdk version directory
+    #already exists in the java directory. If so delete it first, then move unpacked 
+    #directory there. If java directory does not exist, create it first then  move 
+    #the unpacked directory there.
+    echo "Moving your unpacked java ${JDK_VERSION} to the correct place... "
+    if [[ ${_distro} == Arch || ${_distro} == ManjaroLinux  ]]; then
+	JVM_DIR=/usr/lib/jvm
+	echo "Arch based distro means Java directory should  = /usr/lib/jvm"
+	echo "Actual directory in assigned in script = ${JVM_DIR}"
+    else
+	JVM_DIR=/usr/local/java
+	echo "Debian based distro means Java directory = /usr/local/java"
+    fi
+
+     
+    if [[ -d ${JVM_DIR} ]]; then
+	if [[ -e ${JVM_DIR}/${JDK_VERSION} ]]; then
+	    rm -rf ${JVM_DIR}/${JDK_VERSION}
+	    echo " ${JVM_DIR}/${JDK_VERSION} found and deleted to enable re-installation"
+	   # mv -f ${JVM_DIR}/${JDK_VERSION} ${JVM_DIR}/${JDK_VERSION}.old
+	fi
+    else
+	mkdir ${JVM_DIR}
+	echo "${JVM_DIR} didn't exist, but it does now!"
+    fi
+    mv ./${JDK_VERSION} ${JVM_DIR}
+    echo "${JDK_VERSION}  moved to ${JVM_DIR}"
+
+    # Ensure the newly installed java has root ownership
+    chown -R root:root ${JVM_DIR}/${JDK_VERSION}
+    echo "ensured newly installed ${JDK_VERSION} has root ownership"
+}
+
+installPATH (){
+    echo "installing the Java paths into ${PATHFILE}..."
+    if [[ -e ${PATHFILE} ]]; then
+	# First check if you have an old java backup and delete it if so.
+	if [[ -e ${PATHFILE}.java.old ]]; then
+	    rm -f ${PATHFILE}.java.old
+	fi
+	# Make backup copy of ${PATHFILE} just in case it all goes wrong!
+	cp ${PATHFILE} ${PATHFILE}.java.old
+
+	# Check if previous junk ${PATHFILE}2 files left on system and delete if so
+	if [[ -e ${PATHFILE}2 ]]; then
+	    rm -f ${PATHFILE}2
+	fi
+	
+	# Use sed to delete all previous Java path details from ${PATHFILE}
+	# sed -i "/\b\(JAVA\|JAVA_HOME\|JRE_HOME\|export PATH\)\b/d" ${PATHFILE}
+
+	# this grep method apparently faster by far than above sed method. (Deletes java path details from the path file)
+	grep -vwE "(JAVA|JAVA_HOME|JRE_HOME|export PATH)"  ${PATHFILE} > ${PATHFILE}2; mv ${PATHFILE}2 ${PATHFILE}
+
+	# remove leftover ${PATHFILE]2 just to be tidy and so no future problems
+	rm -f ${PATHFILE}2
+ 
+	#install path permenantly into ${PATHFILE}
+	echo ' ' >> ${PATHFILE}
+	echo "JAVA_HOME=${JVM_DIR}/${JDK_VERSION}" >> ${PATHFILE}
+	echo 'JRE_HOME=$JAVA_HOME/jre' >> ${PATHFILE}
+	echo 'PATH=$PATH:$JAVA_HOME/bin:$JRE_HOME/bin' >> ${PATHFILE}
+	echo 'export JAVA_HOME' >> ${PATHFILE}
+    	echo 'export JRE_HOME' >> ${PATHFILE}
+	echo 'export PATH' >> ${PATHFILE}
+
+	#Reload your system wide PATH ${PATHFILE} (Should really log out and back in for full effect)
+	source ${PATHFILE}
+	echo "Path installed into ${PATHFILE}"
+    else
+	echo "It appears that you have no ${PATHFILE} directory"
+	echo "After the script finishes installing java you will"
+   	echo "have to manually add java to your PATH environment"
+	_hasPATHFILE=false
+    fi
+}
+
+setAlternatives (){
+    #Informing your Debian based Linux system where your Oracle Java JDK/JRE is located.
+    # This will tell the system that the new Oracle Java version is available for use. 
+    update-alternatives --install "/usr/bin/java" "java" "/usr/local/java/$JDK_VERSION/bin/java" 2
+    update-alternatives --install "/usr/bin/javac" "javac" "/usr/local/java/$JDK_VERSION/bin/javac" 2
+    update-alternatives --install "/usr/bin/javaws" "javaws" "/usr/local/java/$JDK_VERSION/bin/javaws" 2
+
+    #Inform your Linux system that Oracle Java JDK/JRE must be the default Java:
+    #this command will set the java runtime environment for the system
+    update-alternatives --set java /usr/local/java/$JDK_VERSION/bin/java
+
+    #this command will set the javac compiler for the system
+    update-alternatives --set javac /usr/local/java/$JDK_VERSION/bin/javac
+
+    #this command will set Java Web start for the system
+    update-alternatives --set javaws /usr/local/java/$JDK_VERSION/bin/javaws
+
+    makeExecutable
+}
+
+
+
+makeExecutable(){
+    # Test if your executables are executable, and for everyone:
+    # If not, make them so
+    echo "Making sure your executables are so!"
+    if [[ ! -x /usr/bin/java ]] ; then
+	chmod a+x /usr/bin/java
+    fi
+
+    if [[ ! -x /usr/bin/javac ]] ; then
+	chmod a+x /usr/bin/javac
+    fi
+
+    if [[ ! -x /usr/bin/javaws ]] ; then
+	chmod a+x /usr/bin/javaws
+    fi
+}
+
+setArchJava () {
+      if [[ -e /usr/bin/archlinux-java ]]; then
+	archlinux-java set ${JDK_VERSION}
+	echo "archlinux-java helper script available so using it to set java environment..."
+	installPATH
+    else
+	installPATH
+	#create symlinks in /usr/bin to java executables
+	ln -sf  ${JVM_DIR}/${JDK_VERSION}/jre/bin/java /usr/bin/java 
+	ln -sf  ${JVM_DIR}/${JDK_VERSION}/bin/javac /usr/bin/javac 
+	ln -sf  ${JVM_DIR}/${JDK_VERSION}/bin/javaws /usr/bin/javaws
+	makeExecutable
+	echo "I couldn't find archlinux-java helper script so I Sim-linked the "
+	echo "Oracle java executables in /usr/bin/ direct to  ${JVM_DIR}/${JDK_VERSION}jre/bin/"
+	echo "and ${JVM_DIR}/${JDK_VERSION}/bin/*, as appropriate."
+    fi
+}
+
+setDebianJava () {
+    echo "inside setDebianJava function"
+    installPATH
+    setAlternatives
+}
+
+installFirefoxPlugin(){
+    #Install java plugin into Firefox
+    ##TODO: UPDATE /etc/init.d/apparmor to systemd compliant## - done 5 Oct2016 17:00 Kwambo
+    echo "Now installing java $JDK_VERSION firefox plugin "
+    if [[ -d ${FIREFOX_DIR} ]] ; then
+	echo "Looks like you do have a firefox installed"
+	if [[ -d ${FOX_PLUG_DIR} ]]; then
+	    echo "Looks like you have the plugins directory for firefox"
+	    echo ${FOX_PLUGIN}
+            if [[ -L ${FOX_PLUGIN} ]]; then
+		echo "Looks like you have the plugin symlink, so I will remove it..."
+		rm -f ${FOX_PLUGIN}
+            fi
+      	else
+            mkdir ${FOX_PLUG_DIR}/
+	    echo "looks like you don't have the plugin directory for firefox, so I'm making one..."
+        fi
+	ln -s ${JVM_DIR}/${JDK_VERSION}/jre/lib/amd64/libnpjp2.so ${FOX_PLUGIN}
+	echo "Ok, so an empty plugin directory sorted; now putting a new symlink to the new java plugin into it..."
+	
+	#Recursively change ownership of the plugin directory and plugin.
+	chown -R ${SUDO_USER}: ${FOX_PLUG_DIR}
+	echo "Changed plugin directory and symlink ownership to the home owner instead of root..."
+	
+	# Check if the system has apparmor installed. If so then
+	# check which init system and restart apparmor
+	if [[ -e /etc/apparmor || -e /etc/apparmor.d ]]; then
+	    echo "it looks like you have apparmor installed, so I will try to restart it now..."
+	    getInit
+	    case ${_init} in
+		systemd ) systemctl restart apparmor.service;;
+		upstart ) service apparmor restart;;
+		sysV    ) /etc/init.d/apparmor restart;;
+		*       ) echo "couldn't restart apparmor as you have a weird init system I don't know about";;
+	    esac
+        else echo "Your system doesn't seem to have apparmor on it.  Not serious for the java installation..."
+	fi
+    else
+	echo "Firefox not found in this user account on this computer so plugin not installed." 1>&2
+    fi
+}
+
+
+
+Bye(){
+    echo " "
+    echo "All done. enjoy using Oracle Java $JDK_VERSION. Test installation with 'java -version' at terminal prompt"
+    echo "Bye! from installJava script."
+    echo " "
+}
+
+
+##MAIN-======================================================================
+
+checkLinux
+checkRoot
+RunChoice
+getJDKversion
+untarJDK
+mvJDK
+
+if [[ ${_distro} == Arch || ${_distro} == ManjaroLinux ]] ; then
+   setArchJava
+    echo "main setArchJava finished"
+else
+   setDebianJava
+  echo "main setDebianJava finished"
+fi
+
+echo " "
+echo "Java $JDK_VERSION now fully installed."  
+
+# installFirefoxPlugin
+Bye
+##END-MAIN-===========================================================================
+
+exit 0
+
